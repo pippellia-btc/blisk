@@ -105,6 +105,10 @@ func initSqlite(path string) (*sql.DB, error) {
 	if _, err := db.Exec("PRAGMA busy_timeout = 1000;"); err != nil {
 		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
 	}
+
+	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		return nil, fmt.Errorf("failed to activate foreign keys: %w", err)
+	}
 	return db, nil
 }
 
@@ -165,14 +169,9 @@ func (s *Store) saveMeta(ctx context.Context, uploader string, meta BlobMeta) (c
 	}
 	defer tx.Rollback()
 
-	row := tx.QueryRow(
-		`INSERT INTO blobs (hash, mime, size, created_at, uploaders) VALUES (?, ?, ?, ?, 1)
-		ON CONFLICT(hash) 
-			DO UPDATE SET uploaders = uploaders + 1
-		RETURNING created_at;`,
+	_, err = tx.Exec(`INSERT OR IGNORE INTO blobs (hash, mime, size, created_at) VALUES (?, ?, ?, ?)`,
 		meta.Hash, meta.MIME, meta.Size, now)
-
-	if err = row.Scan(&createdAt); err != nil {
+	if err != nil {
 		return 0, err
 	}
 
@@ -182,13 +181,18 @@ func (s *Store) saveMeta(ctx context.Context, uploader string, meta BlobMeta) (c
 		return 0, err
 	}
 
+	row := tx.QueryRow(`SELECT created_at from blobs WHERE hash = ?`, meta.Hash)
+	if err = row.Scan(&createdAt); err != nil {
+		return 0, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return createdAt, nil
 }
 
-// Lookup returns the metadata about a blob, identified by the provided hash.
+// Lookup returns the metadata of a blob, identified by the provided hash.
 func (s *Store) Lookup(ctx context.Context, hash Hash) (BlobMeta, error) {
 	meta := BlobMeta{Hash: hash}
 	row := s.Index.QueryRowContext(ctx, `SELECT mime, size, created_at FROM blobs WHERE hash = ?`, hash)

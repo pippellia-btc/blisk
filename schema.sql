@@ -2,8 +2,7 @@ CREATE TABLE IF NOT EXISTS blobs (
     hash        TEXT    PRIMARY KEY,    -- sha256 stored as an hexadecimal
     mime        TEXT    NOT NULL,
     size        INTEGER NOT NULL,
-    created_at  INTEGER NOT NULL,
-    uploaders   INTEGER NOT NULL    -- how many uploaded this blob.
+    created_at  INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS uploads (
