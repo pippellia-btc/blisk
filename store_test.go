@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,7 +35,7 @@ func TestSaveLoadBlob(t *testing.T) {
 	}
 	defer store.Close()
 
-	original := []byte("ciao mi chiamo blob")
+	original := []byte("bobby")
 	hash := sha256.Sum256(original)
 
 	if err := store.saveBlob(hash, original); err != nil {
@@ -63,7 +64,7 @@ func TestSaveLookupMeta(t *testing.T) {
 	}
 	defer store.Close()
 
-	blob := []byte("ciao mi chiamo blob")
+	blob := []byte("blobby")
 	original := BlobMeta{
 		Hash: ComputeHash(blob),
 		MIME: http.DetectContentType(blob),
@@ -84,6 +85,39 @@ func TestSaveLookupMeta(t *testing.T) {
 		t.Error("metadata has been altered")
 		t.Errorf("original: \t%v", original)
 		t.Errorf("stored:   \t%v", stored)
+	}
+}
+
+func TestSaveDelete(t *testing.T) {
+	store, err := New(testDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	blob := []byte("buddy")
+	hash := ComputeHash(blob)
+
+	if _, err = store.Save(ctx, blob, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = store.Delete(ctx, hash, "bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = store.Lookup(ctx, hash); err != nil {
+		// the blob should not have been deleted, since "bob" didn't upload it.
+		// Therefore this lookup should not return an error.
+		t.Fatalf("expected no error from lookup")
+	}
+
+	if err = store.Delete(ctx, hash, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = store.Lookup(ctx, hash); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected error %v, got %v", ErrNotFound, err)
 	}
 }
 

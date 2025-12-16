@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -25,6 +26,7 @@ var (
 
 // Store is a local database of blossom blobs, indexed by sqlite.
 type Store struct {
+	writeMu sync.Mutex
 	Index   *sql.DB
 	dirPath string
 }
@@ -120,6 +122,9 @@ func (s *Store) Save(ctx context.Context, blob []byte, uploader string) (BlobMet
 		MIME: http.DetectContentType(blob),
 		Size: int64(len(blob)),
 	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
 	err := s.saveBlob(meta.Hash, blob)
 	if err != nil {
@@ -218,6 +223,67 @@ func (s *Store) Load(ctx context.Context, hash Hash) (Blob, error) {
 		return nil, fmt.Errorf("failed to fetch blob %s: %w", hash, err)
 	}
 	return file, nil
+}
+
+// Delete a blob with the provided hash from the deleter uploads.
+// If a blob is not referenced by any upload, then the blob is deleted.
+func (s *Store) Delete(ctx context.Context, hash Hash, deleter string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	err := s.delete(ctx, hash, deleter)
+	if err != nil {
+		return fmt.Errorf("failed to delete blob %s from %s: %w", hash, deleter, err)
+	}
+	return nil
+}
+
+func (s *Store) delete(ctx context.Context, hash Hash, deleter string) error {
+	tx, err := s.Index.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`DELETE FROM uploads WHERE uploader = ? AND hash = ?`, deleter, hash)
+	if err != nil {
+		return err
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected == 0 {
+		return nil
+	}
+
+	var uploads int64
+	err = tx.QueryRow(`SELECT COUNT(*) FROM uploads WHERE hash = ?`, hash).Scan(&uploads)
+	if err != nil {
+		return err
+	}
+
+	if uploads == 0 {
+		_, err = tx.Exec(`DELETE FROM blobs WHERE hash = ?`, hash)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	if uploads == 0 {
+		path := s.BlobPath(hash)
+		err = os.Remove(path)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove file %w", err)
+		}
+	}
+	return nil
 }
 
 // BlobPath returns the path of the blob based on its hash and the store directory.
