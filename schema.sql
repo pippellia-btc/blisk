@@ -12,3 +12,5 @@ CREATE TABLE IF NOT EXISTS uploads (
     PRIMARY KEY (uploader, hash),
     FOREIGN KEY (hash) REFERENCES blobs(hash) ON DELETE CASCADE
 ) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS uploads_by_hash ON uploads(hash);
