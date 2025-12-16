@@ -27,12 +27,12 @@ var (
 // Store is a local database of blossom blobs, indexed by sqlite.
 type Store struct {
 	writeMu sync.Mutex
-	Index   *sql.DB
+	index   *sql.DB
 	dirPath string
 }
 
 // New returns a local database for blossom blobs, indexed by sqlite.
-func New(dir string, opts ...Option) (*Store, error) {
+func New(dir string) (*Store, error) {
 	if err := initBlobDirs(dir); err != nil {
 		return nil, err
 	}
@@ -43,27 +43,22 @@ func New(dir string, opts ...Option) (*Store, error) {
 	}
 
 	store := &Store{
-		Index:   db,
+		index:   db,
 		dirPath: dir,
-	}
-
-	for _, opt := range opts {
-		if err := opt(store); err != nil {
-			return nil, err
-		}
-	}
-
-	// run full optimize after options, to inform the query planner about new indexes (if any).
-	_, err = db.Exec("PRAGMA optimize=0x10002;")
-	if err != nil {
-		return nil, fmt.Errorf("failed to PRAGMA optimize: %w", err)
 	}
 	return store, nil
 }
 
 // Close the underlying database connection, committing all temporary files.
 func (s *Store) Close() error {
-	return s.Index.Close()
+	return s.index.Close()
+}
+
+// Optimize runs "PRAGMA optimize", which updates the statistics and heuristics
+// of the query planner, improving read performance.
+func (s *Store) Optimize(ctx context.Context) error {
+	_, err := s.index.ExecContext(ctx, "PRAGMA optimize;")
+	return err
 }
 
 // InitBlobDirs creates the main dir /blobs and all sharded sub directories e.g. /blobs/aa/bb
@@ -110,6 +105,10 @@ func initSqlite(path string) (*sql.DB, error) {
 
 	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
 		return nil, fmt.Errorf("failed to activate foreign keys: %w", err)
+	}
+
+	if _, err = db.Exec("PRAGMA optimize=0x10002;"); err != nil {
+		return nil, fmt.Errorf("failed to PRAGMA optimize: %w", err)
 	}
 	return db, nil
 }
@@ -168,7 +167,7 @@ func (s *Store) saveBlob(hash Hash, blob []byte) error {
 func (s *Store) saveMeta(ctx context.Context, uploader string, meta BlobMeta) (createdAt int64, err error) {
 	now := time.Now().Unix()
 
-	tx, err := s.Index.BeginTx(ctx, nil)
+	tx, err := s.index.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -200,7 +199,7 @@ func (s *Store) saveMeta(ctx context.Context, uploader string, meta BlobMeta) (c
 // Lookup returns the metadata of a blob, identified by the provided hash.
 func (s *Store) Lookup(ctx context.Context, hash Hash) (BlobMeta, error) {
 	meta := BlobMeta{Hash: hash}
-	row := s.Index.QueryRowContext(ctx, `SELECT mime, size, created_at FROM blobs WHERE hash = ?`, hash)
+	row := s.index.QueryRowContext(ctx, `SELECT mime, size, created_at FROM blobs WHERE hash = ?`, hash)
 
 	err := row.Scan(&meta.MIME, &meta.Size, &meta.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -239,7 +238,7 @@ func (s *Store) Delete(ctx context.Context, hash Hash, deleter string) error {
 }
 
 func (s *Store) delete(ctx context.Context, hash Hash, deleter string) error {
-	tx, err := s.Index.BeginTx(ctx, nil)
+	tx, err := s.index.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
