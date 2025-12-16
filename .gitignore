@@ -34,3 +34,4 @@ go.work.sum
 # dir used for tests.
 /blossom
 /test
+/blobs
