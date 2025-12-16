@@ -54,6 +54,17 @@ func (s *Store) Close() error {
 	return s.index.Close()
 }
 
+// BlobPath returns the path of the blob based on its hash and the store directory.
+func (s *Store) BlobPath(hash Hash) string {
+	return filepath.Join(s.dirPath, blobPath(hash))
+}
+
+// BlobPath returns the path of the blob based on its hash.
+func blobPath(hash Hash) string {
+	hex := hash.String()
+	return filepath.Join("blobs", hex[0:2], hex[2:4], hex)
+}
+
 // Optimize runs "PRAGMA optimize", which updates the statistics and heuristics
 // of the query planner, improving read performance.
 func (s *Store) Optimize(ctx context.Context) error {
@@ -196,8 +207,8 @@ func (s *Store) saveMeta(ctx context.Context, uploader string, meta BlobMeta) (c
 	return createdAt, nil
 }
 
-// Lookup returns the metadata of a blob, identified by the provided hash.
-func (s *Store) Lookup(ctx context.Context, hash Hash) (BlobMeta, error) {
+// Info returns the metadata of a blob, identified by the provided hash.
+func (s *Store) Info(ctx context.Context, hash Hash) (BlobMeta, error) {
 	meta := BlobMeta{Hash: hash}
 	row := s.index.QueryRowContext(ctx, `SELECT mime, size, created_at FROM blobs WHERE hash = ?`, hash)
 
@@ -211,16 +222,16 @@ func (s *Store) Lookup(ctx context.Context, hash Hash) (BlobMeta, error) {
 	return meta, nil
 }
 
-// BlobsOf return the list of all the hashes of blobs uploaded by the provided uploader.
-func (s *Store) BlobsOf(ctx context.Context, uploader string) ([]Hash, error) {
-	hashes, err := s.blobsOf(ctx, uploader)
+// Hashes return the list of all the hashes of blobs uploaded by the provided uploader.
+func (s *Store) Hashes(ctx context.Context, uploader string) ([]Hash, error) {
+	hashes, err := s.hashes(ctx, uploader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to the blobs of of %s: %w", uploader, err)
 	}
 	return hashes, nil
 }
 
-func (s *Store) blobsOf(ctx context.Context, uploader string) ([]Hash, error) {
+func (s *Store) hashes(ctx context.Context, uploader string) ([]Hash, error) {
 	rows, err := s.index.QueryContext(ctx, `SELECT hash FROM uploads WHERE uploader = ?`, uploader)
 	if err != nil {
 		return nil, err
@@ -315,15 +326,4 @@ func (s *Store) delete(ctx context.Context, hash Hash, deleter string) error {
 		}
 	}
 	return nil
-}
-
-// BlobPath returns the path of the blob based on its hash and the store directory.
-func (s *Store) BlobPath(hash Hash) string {
-	return filepath.Join(s.dirPath, blobPath(hash))
-}
-
-// BlobPath returns the path of the blob based on its hash.
-func blobPath(hash Hash) string {
-	hex := hash.String()
-	return filepath.Join("blobs", hex[0:2], hex[2:4], hex)
 }

@@ -57,7 +57,7 @@ func TestSaveLoadBlob(t *testing.T) {
 	}
 }
 
-func TestSaveLookupMeta(t *testing.T) {
+func TestSaveInfoMeta(t *testing.T) {
 	store, err := New(testDir)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestSaveLookupMeta(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stored, err := store.Lookup(ctx, original.Hash)
+	stored, err := store.Info(ctx, original.Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,18 +106,18 @@ func TestSaveDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err = store.Lookup(ctx, hash); err != nil {
+	if _, err = store.Info(ctx, hash); err != nil {
 		// the blob should not have been deleted, since "bob" didn't upload it.
-		// Therefore this lookup should not return an error.
-		t.Fatalf("expected no error from lookup")
+		// Therefore this Info should not return an error.
+		t.Fatalf("expected no error from Info, got %v", err)
 	}
 
 	if err = store.Delete(ctx, hash, "alice"); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err = store.Lookup(ctx, hash); !errors.Is(err, ErrNotFound) {
-		// the blob should have been deleted, so lookup should return [ErrNotFound].
+	if _, err = store.Info(ctx, hash); !errors.Is(err, ErrNotFound) {
+		// the blob should have been deleted, so Info should return [ErrNotFound].
 		t.Fatalf("expected error %v, got %v", ErrNotFound, err)
 	}
 }
@@ -140,7 +140,7 @@ func TestBlobsOf(t *testing.T) {
 		original[i] = meta.Hash
 	}
 
-	hashes, err := store.BlobsOf(ctx, "alice")
+	hashes, err := store.Hashes(ctx, "alice")
 	if err != nil {
 		t.Fatalf("expected error nil, got %v", err)
 	}
