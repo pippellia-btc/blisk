@@ -1,6 +1,7 @@
 package blobstore
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -8,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"reflect"
 	"slices"
 	"testing"
@@ -117,32 +117,44 @@ func TestSaveDelete(t *testing.T) {
 	}
 
 	if _, err = store.Lookup(ctx, hash); !errors.Is(err, ErrNotFound) {
+		// the blob should have been deleted, so lookup should return [ErrNotFound].
 		t.Fatalf("expected error %v, got %v", ErrNotFound, err)
 	}
 }
 
-// ExtractMetadata reads the file at path and returns its MIME type and size.
-func ExtractMetadata(file *os.File) (mime string, size int64, err error) {
-	info, err := file.Stat()
+func TestBlobsOf(t *testing.T) {
+	store, err := New(testDir)
 	if err != nil {
-		return "", 0, err
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	original := make([]Hash, 100)
+	for i := range 100 {
+		blob := []byte(fmt.Sprintf("blob %d", i))
+
+		meta, err := store.Save(ctx, blob, "alice")
+		if err != nil {
+			t.Fatalf("setup failed: %v", err)
+		}
+		original[i] = meta.Hash
 	}
 
-	// Read first 512 bytes for MIME detection
-	buf := make([]byte, 512)
-	n, err := file.Read(buf)
-	if err != nil && err != io.EOF {
-		return "", 0, err
-	}
-
-	_, err = file.Seek(0, io.SeekStart)
+	hashes, err := store.BlobsOf(ctx, "alice")
 	if err != nil {
-		return "", 0, err
+		t.Fatalf("expected error nil, got %v", err)
 	}
 
-	mime = http.DetectContentType(buf[:n])
-	size = info.Size()
-	return mime, size, nil
+	slices.SortFunc(original, func(a, b Hash) int {
+		return cmp.Compare(string(a[:]), string(b[:]))
+	})
+	slices.SortFunc(hashes, func(a, b Hash) int {
+		return cmp.Compare(string(a[:]), string(b[:]))
+	})
+
+	if !slices.Equal(original, hashes) {
+		t.Fatalf("expected hashes %v, got %v", original, hashes)
+	}
 }
 
 func TestBlobPath(t *testing.T) {

@@ -211,6 +211,38 @@ func (s *Store) Lookup(ctx context.Context, hash Hash) (BlobMeta, error) {
 	return meta, nil
 }
 
+// BlobsOf return the list of all the hashes of blobs uploaded by the provided uploader.
+func (s *Store) BlobsOf(ctx context.Context, uploader string) ([]Hash, error) {
+	hashes, err := s.blobsOf(ctx, uploader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to the blobs of of %s: %w", uploader, err)
+	}
+	return hashes, nil
+}
+
+func (s *Store) blobsOf(ctx context.Context, uploader string) ([]Hash, error) {
+	rows, err := s.index.QueryContext(ctx, `SELECT hash FROM uploads WHERE uploader = ?`, uploader)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	hashes := make([]Hash, 0, 20)
+	for rows.Next() {
+		var hash Hash
+		if err = rows.Scan(&hash); err != nil {
+			return nil, err
+		}
+
+		hashes = append(hashes, hash)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return hashes, nil
+}
+
 // Load the [Blob] by the provided hash.
 func (s *Store) Load(ctx context.Context, hash Hash) (Blob, error) {
 	path := s.BlobPath(hash)
