@@ -1,4 +1,4 @@
-module github.com/pippellia-btc/blobstore
+module github.com/pippellia-btc/blisk
 
 go 1.23.1
 

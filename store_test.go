@@ -1,4 +1,4 @@
-package blobstore
+package blisk
 
 import (
 	"cmp"
@@ -20,7 +20,7 @@ var (
 )
 
 func init() {
-	// initialize the blobstore directories and index
+	// initialize the blisk directories and index
 	store, err := New(testDir)
 	if err != nil {
 		panic(err)
