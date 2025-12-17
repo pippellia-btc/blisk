@@ -255,7 +255,7 @@ func (s *Store) hashes(ctx context.Context, uploader string) ([]Hash, error) {
 }
 
 // Load the [Blob] by the provided hash.
-func (s *Store) Load(ctx context.Context, hash Hash) (Blob, error) {
+func (s *Store) Load(ctx context.Context, hash Hash) (*os.File, error) {
 	path := s.BlobPath(hash)
 	file, err := os.Open(path)
 	if os.IsNotExist(err) {
