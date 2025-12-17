@@ -105,6 +105,16 @@ func initSqlite(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// Size returns the number of blobs currently stored.
+func (s *Store) Size(ctx context.Context) (int, error) {
+	var size int
+	err := s.index.QueryRowContext(ctx, `SELECT COUNT(*) FROM blobs;`).Scan(&size)
+	if err != nil {
+		return -1, fmt.Errorf("failed to get the size of the store: %w", err)
+	}
+	return size, nil
+}
+
 func (s *Store) lock(h Hash) {
 	prefix := h.Hex()[0:3]
 	s.shards[prefix].Lock()
