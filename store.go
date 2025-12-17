@@ -18,15 +18,13 @@ import (
 //go:embed schema.sql
 var schema string
 
-var hexes = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"}
-
 var (
 	ErrNotFound = errors.New("blob not found")
 )
 
 // Store is a local database of blossom blobs, indexed by sqlite.
 type Store struct {
-	writeMu sync.Mutex
+	shards  map[string]*sync.Mutex
 	index   *sql.DB
 	dirPath string
 }
@@ -43,52 +41,33 @@ func New(dir string) (*Store, error) {
 	}
 
 	store := &Store{
+		shards:  initShards(),
 		index:   db,
 		dirPath: dir,
 	}
 	return store, nil
 }
 
-// Close the underlying database connection, committing all temporary files.
-func (s *Store) Close() error {
-	return s.index.Close()
+// InitShards initializes the map of mutexes.
+func initShards() map[string]*sync.Mutex {
+	m := make(map[string]*sync.Mutex, 16*16*16)
+	for _, hex := range hex3Comb() {
+		m[hex] = &sync.Mutex{}
+	}
+	return m
 }
 
-// BlobPath returns the path of the blob based on its hash and the store directory.
-func (s *Store) BlobPath(hash Hash) string {
-	return filepath.Join(s.dirPath, blobPath(hash))
-}
-
-// BlobPath returns the path of the blob based on its hash.
-func blobPath(hash Hash) string {
-	hex := hash.String()
-	return filepath.Join("blobs", hex[0:2], hex[2:4], hex)
-}
-
-// Optimize runs "PRAGMA optimize", which updates the statistics and heuristics
-// of the query planner, improving read performance.
-func (s *Store) Optimize(ctx context.Context) error {
-	_, err := s.index.ExecContext(ctx, "PRAGMA optimize;")
-	return err
-}
-
-// InitBlobDirs creates the main dir /blobs and all sharded sub directories e.g. /blobs/aa/bb
+// InitBlobDirs creates the main dir /blobs and all sharded sub directories e.g. /blobs/abc/
 func initBlobDirs(path string) error {
 	baseDir := filepath.Join(path, "blobs")
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create base dir: %w", err)
 	}
 
-	for _, c1 := range hexes {
-		for _, c2 := range hexes {
-			for _, c3 := range hexes {
-				for _, c4 := range hexes {
-					shard := filepath.Join(baseDir, c1+c2, c3+c4)
-					if err := os.MkdirAll(shard, 0o755); err != nil {
-						return fmt.Errorf("failed to create %s: %w", shard, err)
-					}
-				}
-			}
+	for _, hex := range hex3Comb() {
+		shard := filepath.Join(baseDir, hex)
+		if err := os.MkdirAll(shard, 0o755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", shard, err)
 		}
 	}
 	return nil
@@ -124,6 +103,39 @@ func initSqlite(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+func (s *Store) lock(h Hash) {
+	prefix := h.Hex()[0:3]
+	s.shards[prefix].Lock()
+}
+
+func (s *Store) unlock(h Hash) {
+	prefix := h.Hex()[0:3]
+	s.shards[prefix].Unlock()
+}
+
+// Close the underlying database connection, committing all temporary files.
+func (s *Store) Close() error {
+	return s.index.Close()
+}
+
+// BlobPath returns the path of the blob based on its hash and the store directory.
+func (s *Store) BlobPath(hash Hash) string {
+	return filepath.Join(s.dirPath, blobPath(hash))
+}
+
+// BlobPath returns the path of the blob based on its hash.
+func blobPath(hash Hash) string {
+	hex := hash.Hex()
+	return filepath.Join("blobs", hex[0:3], hex)
+}
+
+// Optimize runs "PRAGMA optimize", which updates the statistics and heuristics
+// of the query planner, improving read performance.
+func (s *Store) Optimize(ctx context.Context) error {
+	_, err := s.index.ExecContext(ctx, "PRAGMA optimize;")
+	return err
+}
+
 // Save the provided blob by its hash, returning the [BlobMeta] or an error.
 // It is idempotent; multiple calls to Save with the same blob and uploader will result in a no-op.
 func (s *Store) Save(ctx context.Context, blob []byte, uploader string) (BlobMeta, error) {
@@ -133,8 +145,8 @@ func (s *Store) Save(ctx context.Context, blob []byte, uploader string) (BlobMet
 		Size: int64(len(blob)),
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	s.lock(meta.Hash)
+	defer s.unlock(meta.Hash)
 
 	err := s.saveBlob(meta.Hash, blob)
 	if err != nil {
@@ -270,8 +282,8 @@ func (s *Store) Load(ctx context.Context, hash Hash) (*os.File, error) {
 // Delete a blob with the provided hash from the deleter uploads.
 // If a blob is not referenced by any upload, then the blob is deleted.
 func (s *Store) Delete(ctx context.Context, hash Hash, deleter string) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	s.lock(hash)
+	defer s.unlock(hash)
 
 	err := s.delete(ctx, hash, deleter)
 	if err != nil {
@@ -326,4 +338,19 @@ func (s *Store) delete(ctx context.Context, hash Hash, deleter string) error {
 		}
 	}
 	return nil
+}
+
+var hexes = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"}
+
+// hex3Comb returns all 4096 possible combinations of exactly 3 hex characters.
+func hex3Comb() []string {
+	comb := make([]string, 0, 16*16*16)
+	for _, c1 := range hexes {
+		for _, c2 := range hexes {
+			for _, c3 := range hexes {
+				comb = append(comb, c1+c2+c3)
+			}
+		}
+	}
+	return comb
 }
