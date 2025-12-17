@@ -23,6 +23,8 @@ var (
 )
 
 // Store is a local database of blossom blobs, indexed by sqlite.
+// It is safe to be used by multiple goroutines inside the same program.
+// Multi programs writes are unsafe and might result in data loss.
 type Store struct {
 	shards  map[string]*sync.Mutex
 	index   *sql.DB
@@ -280,7 +282,7 @@ func (s *Store) Load(ctx context.Context, hash Hash) (*os.File, error) {
 }
 
 // Delete a blob with the provided hash from the deleter uploads.
-// If a blob is not referenced by any upload, then the blob is deleted.
+// If a blob is not referenced by any upload, the blob is then deleted from disk.
 func (s *Store) Delete(ctx context.Context, hash Hash, deleter string) error {
 	s.lock(hash)
 	defer s.unlock(hash)
