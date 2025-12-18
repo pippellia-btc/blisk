@@ -12,6 +12,8 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+
+	"github.com/pippellia-btc/blossom"
 )
 
 var (
@@ -65,8 +67,8 @@ func TestSaveInfoMeta(t *testing.T) {
 	defer store.Close()
 
 	blob := []byte("blobby")
-	original := BlobMeta{
-		Hash: ComputeHash(blob),
+	original := blossom.BlobMeta{
+		Hash: blossom.ComputeHash(blob),
 		MIME: http.DetectContentType(blob),
 		Size: int64(len(blob)),
 	}
@@ -96,7 +98,7 @@ func TestSaveDelete(t *testing.T) {
 	defer store.Close()
 
 	blob := []byte("buddy")
-	hash := ComputeHash(blob)
+	hash := blossom.ComputeHash(blob)
 
 	if _, err = store.Save(ctx, blob, "alice"); err != nil {
 		t.Fatal(err)
@@ -129,7 +131,7 @@ func TestBlobsOf(t *testing.T) {
 	}
 	defer store.Close()
 
-	original := make([]Hash, 100)
+	original := make([]blossom.Hash, 100)
 	for i := range 100 {
 		blob := []byte(fmt.Sprintf("blob %d", i))
 
@@ -145,10 +147,10 @@ func TestBlobsOf(t *testing.T) {
 		t.Fatalf("expected error nil, got %v", err)
 	}
 
-	slices.SortFunc(original, func(a, b Hash) int {
+	slices.SortFunc(original, func(a, b blossom.Hash) int {
 		return cmp.Compare(string(a[:]), string(b[:]))
 	})
-	slices.SortFunc(hashes, func(a, b Hash) int {
+	slices.SortFunc(hashes, func(a, b blossom.Hash) int {
 		return cmp.Compare(string(a[:]), string(b[:]))
 	})
 
@@ -171,7 +173,7 @@ func TestBlobPath(t *testing.T) {
 
 	for i, test := range tests {
 		t.Run(fmt.Sprintf("case=%d", i), func(t *testing.T) {
-			hash, err := ParseHash(test.hex)
+			hash, err := blossom.ParseHash(test.hex)
 			if err != nil {
 				t.Fatalf("setup failed: %v", err)
 			}

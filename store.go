@@ -13,6 +13,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/pippellia-btc/blossom"
 )
 
 //go:embed schema.sql
@@ -115,12 +116,12 @@ func (s *Store) Size(ctx context.Context) (int, error) {
 	return size, nil
 }
 
-func (s *Store) lock(h Hash) {
+func (s *Store) lock(h blossom.Hash) {
 	prefix := h.Hex()[0:3]
 	s.shards[prefix].Lock()
 }
 
-func (s *Store) unlock(h Hash) {
+func (s *Store) unlock(h blossom.Hash) {
 	prefix := h.Hex()[0:3]
 	s.shards[prefix].Unlock()
 }
@@ -131,12 +132,12 @@ func (s *Store) Close() error {
 }
 
 // BlobPath returns the path of the blob based on its hash and the store directory.
-func (s *Store) BlobPath(hash Hash) string {
+func (s *Store) BlobPath(hash blossom.Hash) string {
 	return filepath.Join(s.dirPath, blobPath(hash))
 }
 
 // BlobPath returns the path of the blob based on its hash.
-func blobPath(hash Hash) string {
+func blobPath(hash blossom.Hash) string {
 	hex := hash.Hex()
 	return filepath.Join("blobs", hex[0:3], hex)
 }
@@ -148,11 +149,11 @@ func (s *Store) Optimize(ctx context.Context) error {
 	return err
 }
 
-// Save the provided blob by its hash, returning the [BlobMeta] or an error.
+// Save the provided blob by its hash, returning the [blossom.BlobMeta] or an error.
 // It is idempotent; multiple calls to Save with the same blob and uploader will result in a no-op.
-func (s *Store) Save(ctx context.Context, blob []byte, uploader string) (BlobMeta, error) {
-	meta := BlobMeta{
-		Hash: ComputeHash(blob),
+func (s *Store) Save(ctx context.Context, blob []byte, uploader string) (blossom.BlobMeta, error) {
+	meta := blossom.BlobMeta{
+		Hash: blossom.ComputeHash(blob),
 		MIME: http.DetectContentType(blob),
 		Size: int64(len(blob)),
 	}
@@ -162,19 +163,19 @@ func (s *Store) Save(ctx context.Context, blob []byte, uploader string) (BlobMet
 
 	err := s.saveBlob(meta.Hash, blob)
 	if err != nil {
-		return BlobMeta{}, fmt.Errorf("failed to save blob %s: %w", meta.Hash, err)
+		return blossom.BlobMeta{}, fmt.Errorf("failed to save blob %s: %w", meta.Hash, err)
 	}
 
 	meta.CreatedAt, err = s.saveMeta(ctx, uploader, meta)
 	if err != nil {
-		return BlobMeta{}, fmt.Errorf("failed to save metadata of blob %s: %w", meta.Hash, err)
+		return blossom.BlobMeta{}, fmt.Errorf("failed to save metadata of blob %s: %w", meta.Hash, err)
 	}
 	return meta, nil
 }
 
 // SaveBlob by the provided hash.
 // It is idempotent; multiple calls to saveBlob with the same hash will return early without writing to disk.
-func (s *Store) saveBlob(hash Hash, blob []byte) error {
+func (s *Store) saveBlob(hash blossom.Hash, blob []byte) error {
 	path := s.BlobPath(hash)
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if os.IsExist(err) {
@@ -199,7 +200,7 @@ func (s *Store) saveBlob(hash Hash, blob []byte) error {
 
 // SaveMeta saves the blob metadata.
 // It is idempotent; multiple calls to saveMeta with the same hash and uploader will result in a no-op.
-func (s *Store) saveMeta(ctx context.Context, uploader string, meta BlobMeta) (createdAt int64, err error) {
+func (s *Store) saveMeta(ctx context.Context, uploader string, meta blossom.BlobMeta) (createdAt int64, err error) {
 	now := time.Now().Unix()
 
 	tx, err := s.index.BeginTx(ctx, nil)
@@ -232,22 +233,22 @@ func (s *Store) saveMeta(ctx context.Context, uploader string, meta BlobMeta) (c
 }
 
 // Info returns the metadata of a blob, identified by the provided hash.
-func (s *Store) Info(ctx context.Context, hash Hash) (BlobMeta, error) {
-	meta := BlobMeta{Hash: hash}
+func (s *Store) Info(ctx context.Context, hash blossom.Hash) (blossom.BlobMeta, error) {
+	meta := blossom.BlobMeta{Hash: hash}
 	row := s.index.QueryRowContext(ctx, `SELECT mime, size, created_at FROM blobs WHERE hash = ?`, hash)
 
 	err := row.Scan(&meta.MIME, &meta.Size, &meta.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return BlobMeta{}, fmt.Errorf("%w: hash %s", ErrNotFound, hash)
+		return blossom.BlobMeta{}, fmt.Errorf("%w: hash %s", ErrNotFound, hash)
 	}
 	if err != nil {
-		return BlobMeta{}, fmt.Errorf("failed to fetch metadata of blob %s: %w", hash, err)
+		return blossom.BlobMeta{}, fmt.Errorf("failed to fetch metadata of blob %s: %w", hash, err)
 	}
 	return meta, nil
 }
 
 // Hashes return the list of all the hashes of blobs uploaded by the provided uploader.
-func (s *Store) Hashes(ctx context.Context, uploader string) ([]Hash, error) {
+func (s *Store) Hashes(ctx context.Context, uploader string) ([]blossom.Hash, error) {
 	hashes, err := s.hashes(ctx, uploader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to the blobs of of %s: %w", uploader, err)
@@ -255,16 +256,16 @@ func (s *Store) Hashes(ctx context.Context, uploader string) ([]Hash, error) {
 	return hashes, nil
 }
 
-func (s *Store) hashes(ctx context.Context, uploader string) ([]Hash, error) {
+func (s *Store) hashes(ctx context.Context, uploader string) ([]blossom.Hash, error) {
 	rows, err := s.index.QueryContext(ctx, `SELECT hash FROM uploads WHERE uploader = ?`, uploader)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	hashes := make([]Hash, 0, 20)
+	hashes := make([]blossom.Hash, 0, 20)
 	for rows.Next() {
-		var hash Hash
+		var hash blossom.Hash
 		if err = rows.Scan(&hash); err != nil {
 			return nil, err
 		}
@@ -279,7 +280,7 @@ func (s *Store) hashes(ctx context.Context, uploader string) ([]Hash, error) {
 }
 
 // Load the [Blob] by the provided hash.
-func (s *Store) Load(ctx context.Context, hash Hash) (*os.File, error) {
+func (s *Store) Load(ctx context.Context, hash blossom.Hash) (*os.File, error) {
 	path := s.BlobPath(hash)
 	file, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -293,7 +294,7 @@ func (s *Store) Load(ctx context.Context, hash Hash) (*os.File, error) {
 
 // Delete a blob with the provided hash from the deleter uploads.
 // If a blob is not referenced by any upload, the blob is then deleted from disk.
-func (s *Store) Delete(ctx context.Context, hash Hash, deleter string) error {
+func (s *Store) Delete(ctx context.Context, hash blossom.Hash, deleter string) error {
 	s.lock(hash)
 	defer s.unlock(hash)
 
@@ -304,7 +305,7 @@ func (s *Store) Delete(ctx context.Context, hash Hash, deleter string) error {
 	return nil
 }
 
-func (s *Store) delete(ctx context.Context, hash Hash, deleter string) error {
+func (s *Store) delete(ctx context.Context, hash blossom.Hash, deleter string) error {
 	tx, err := s.index.BeginTx(ctx, nil)
 	if err != nil {
 		return err
