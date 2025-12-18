@@ -14,7 +14,7 @@ go get github.com/pippellia-btc/blisk
 
 - **Deduplication:** Multiple uploads of the same blob are stored only once. Only when all uploaders delete a blob is it removed from disk, saving storage space.
 
-- **Idempotent operations:** Saving or deleting the same blob multiple times with the same uploader is a no-op.
+- **Idempotent operations:** Saving or deleting the same blob multiple times is a no-op if performed by the same entity.
 
 ## Limitations
 
@@ -34,9 +34,7 @@ blobs/
 ```
 
 A blob with hash `abcdef123...` is stored in: `blobs/abc/abcdef123...`
-
-This sharding strategy ensures low contention and efficient filesystem operations.
-
+This sharding strategy ensures low contention and allows for up to 4096 concurrent writes.
 
 ## Usage
 
@@ -52,6 +50,8 @@ defer store.Close()
 
 ### Saving a blob
 
+Saving a blob to disk only if not already present, adding its hash to the uploads of the specified uploader.
+
 ```go
 blob := []byte("hello world")
 uploader := "alice" // normally this would be a npub
@@ -65,6 +65,8 @@ fmt.Printf("Saved blob with hash %v", meta.Hash)
 
 ### Loading a blob
 
+Loading the blob's file associated with the provided hash.
+
 ```go
 file, err := store.Load(ctx, hash)
 if err != nil {
@@ -73,7 +75,21 @@ if err != nil {
 defer file.Close()
 ```
 
-### Listing uploader blobs
+### Fetching metadata
+
+Fetching blob's metadata without loading it into memory.
+
+```go
+meta, err := store.Info(ctx, hash)
+if err != nil {
+    log.Print(err)
+}
+fmt.Printf("blob %s: size %d, mime %s", hash, meta.Size, meta.MIME)
+```
+
+### Listing uploads
+
+Listing all hashes uploaded by an entity, for example a nostr pubkey.
 
 ```go
 uploader := "alice" // normally this would be a npub
@@ -86,6 +102,9 @@ fmt.Printf("Uploader %s has blobs %v", uploader, hashes)
 ```
 
 ### Deleting a blob
+
+Deleting a blob from the uploads of an entity. If no entity reference the blob, it is then deleted from disk.
+
 ```go
 deleter := "alice" // normally this would be a npub
 
