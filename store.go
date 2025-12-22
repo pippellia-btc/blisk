@@ -27,7 +27,7 @@ var (
 // It is safe to be used by multiple goroutines inside the same program.
 // Multi programs writes are unsafe and might result in data loss.
 type Store struct {
-	shards  map[string]*sync.Mutex
+	shards  [4096]sync.Mutex
 	index   *sql.DB
 	dirPath string
 }
@@ -44,20 +44,10 @@ func New(dir string) (*Store, error) {
 	}
 
 	store := &Store{
-		shards:  initShards(),
 		index:   db,
 		dirPath: dir,
 	}
 	return store, nil
-}
-
-// InitShards initializes the map of mutexes.
-func initShards() map[string]*sync.Mutex {
-	m := make(map[string]*sync.Mutex, 16*16*16)
-	for _, hex := range hex3Comb() {
-		m[hex] = &sync.Mutex{}
-	}
-	return m
 }
 
 // InitBlobDirs creates the main dir /blobs and all sharded sub directories e.g. /blobs/abc/
@@ -67,8 +57,8 @@ func initBlobDirs(path string) error {
 		return fmt.Errorf("failed to create base dir: %w", err)
 	}
 
-	for _, hex := range hex3Comb() {
-		shard := filepath.Join(baseDir, hex)
+	for _, hex3 := range AllHex3() {
+		shard := filepath.Join(baseDir, string(hex3))
 		if err := os.MkdirAll(shard, 0o755); err != nil {
 			return fmt.Errorf("failed to create %s: %w", shard, err)
 		}
@@ -118,15 +108,17 @@ func (s *Store) Size(ctx context.Context) (int, error) {
 
 func (s *Store) lock(h blossom.Hash) {
 	prefix := h.Hex()[0:3]
-	s.shards[prefix].Lock()
+	idx := Hex3(prefix).Int()
+	s.shards[idx].Lock()
 }
 
 func (s *Store) unlock(h blossom.Hash) {
 	prefix := h.Hex()[0:3]
-	s.shards[prefix].Unlock()
+	idx := Hex3(prefix).Int()
+	s.shards[idx].Unlock()
 }
 
-// Close the underlying database connection, committing all temporary files.
+// Close the underlying database connection, committing all temporary WAL files.
 func (s *Store) Close() error {
 	return s.index.Close()
 }
@@ -351,19 +343,4 @@ func (s *Store) delete(ctx context.Context, hash blossom.Hash, deleter string) e
 		}
 	}
 	return nil
-}
-
-var hexes = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"}
-
-// hex3Comb returns all 4096 possible combinations of exactly 3 hex characters.
-func hex3Comb() []string {
-	comb := make([]string, 0, 16*16*16)
-	for _, c1 := range hexes {
-		for _, c2 := range hexes {
-			for _, c3 := range hexes {
-				comb = append(comb, c1+c2+c3)
-			}
-		}
-	}
-	return comb
 }
