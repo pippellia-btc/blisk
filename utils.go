@@ -2,6 +2,8 @@ package blisk
 
 import (
 	"fmt"
+	"math/rand/v2"
+	"os"
 	"strconv"
 )
 
@@ -41,4 +43,16 @@ func AllHex3() []Hex3 {
 		}
 	}
 	return comb
+}
+
+// RandHex3 returns a random Hex3. Not suitable for security purposes.
+func RandHex3() Hex3 {
+	n := rand.IntN(4096)
+	return Hex3(fmt.Sprintf("%03x", n))
+}
+
+// Cleanup closes a (temporary) file and removes it from disk.
+func cleanup(f *os.File) {
+	f.Close()
+	os.Remove(f.Name())
 }

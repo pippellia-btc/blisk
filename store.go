@@ -2,13 +2,16 @@ package blisk
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -34,7 +37,7 @@ type Store struct {
 
 // New returns a local database for blossom blobs, indexed by sqlite.
 func New(dir string) (*Store, error) {
-	if err := initBlobDirs(dir); err != nil {
+	if err := initDirs(dir); err != nil {
 		return nil, err
 	}
 
@@ -50,17 +53,27 @@ func New(dir string) (*Store, error) {
 	return store, nil
 }
 
-// InitBlobDirs creates the main dir /blobs and all sharded sub directories e.g. /blobs/abc/
-func initBlobDirs(path string) error {
-	baseDir := filepath.Join(path, "blobs")
-	if err := os.MkdirAll(baseDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create base dir: %w", err)
+// initDirs creates the main dirs /blobs and /tmp and all their sharded sub directories e.g. /blobs/abc/
+func initDirs(path string) error {
+	blobs := filepath.Join(path, "blobs")
+	if err := os.MkdirAll(blobs, 0o755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", blobs, err)
+	}
+
+	tmp := filepath.Join(path, "tmp")
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", tmp, err)
 	}
 
 	for _, hex3 := range AllHex3() {
-		shard := filepath.Join(baseDir, string(hex3))
-		if err := os.MkdirAll(shard, 0o755); err != nil {
-			return fmt.Errorf("failed to create %s: %w", shard, err)
+		fname := filepath.Join(blobs, string(hex3))
+		if err := os.MkdirAll(fname, 0o755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", fname, err)
+		}
+
+		fname = filepath.Join(tmp, string(hex3))
+		if err := os.MkdirAll(fname, 0o755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", fname, err)
 		}
 	}
 	return nil
@@ -123,15 +136,17 @@ func (s *Store) Close() error {
 	return s.index.Close()
 }
 
-// BlobPath returns the path of the blob based on its hash and the store directory.
-func (s *Store) BlobPath(hash blossom.Hash) string {
-	return filepath.Join(s.dirPath, blobPath(hash))
+// TmpDir returns a random temporary dir to be used for saving blobs
+// before moving them to the /blobs directory.
+func (s *Store) TmpDir() string {
+	shard := string(RandHex3())
+	return filepath.Join(s.dirPath, "tmp", shard)
 }
 
-// BlobPath returns the path of the blob based on its hash.
-func blobPath(hash blossom.Hash) string {
+// BlobPath returns the path of the blob based on its hash and the store directory.
+func (s *Store) BlobPath(hash blossom.Hash) string {
 	hex := hash.Hex()
-	return filepath.Join("blobs", hex[0:3], hex)
+	return filepath.Join(s.dirPath, "blobs", hex[0:3], hex)
 }
 
 // Optimize runs "PRAGMA optimize", which updates the statistics and heuristics
@@ -143,19 +158,19 @@ func (s *Store) Optimize(ctx context.Context) error {
 
 // Save the provided blob by its hash, returning the [blossom.BlobMeta] or an error.
 // It is idempotent; multiple calls to Save with the same blob and uploader will result in a no-op.
-func (s *Store) Save(ctx context.Context, blob []byte, uploader string) (blossom.BlobMeta, error) {
-	meta := blossom.BlobMeta{
-		Hash: blossom.ComputeHash(blob),
-		MIME: http.DetectContentType(blob),
-		Size: int64(len(blob)),
+func (s *Store) Save(ctx context.Context, blob io.Reader, uploader string) (blossom.BlobMeta, error) {
+	meta, tmp, err := s.saveTmpBlob(blob)
+	if err != nil {
+		return blossom.BlobMeta{}, fmt.Errorf("failed to save blob: %w", err)
 	}
 
 	s.lock(meta.Hash)
 	defer s.unlock(meta.Hash)
 
-	err := s.saveBlob(meta.Hash, blob)
+	err = s.commitBlob(meta.Hash, tmp)
 	if err != nil {
-		return blossom.BlobMeta{}, fmt.Errorf("failed to save blob %s: %w", meta.Hash, err)
+		os.Remove(tmp)
+		return blossom.BlobMeta{}, fmt.Errorf("failed to commit blob %s: %w", meta.Hash, err)
 	}
 
 	meta.CreatedAt, err = s.saveMeta(ctx, uploader, meta)
@@ -165,29 +180,75 @@ func (s *Store) Save(ctx context.Context, blob []byte, uploader string) (blossom
 	return meta, nil
 }
 
-// SaveBlob by the provided hash.
-// It is idempotent; multiple calls to saveBlob with the same hash will return early without writing to disk.
-func (s *Store) saveBlob(hash blossom.Hash, blob []byte) error {
+// SaveTmpBlob writes the blob to a temp dir, while computing the blob's metadata
+// like size, hash and MIME type.
+func (s *Store) saveTmpBlob(blob io.Reader) (meta blossom.BlobMeta, tmpPath string, err error) {
+	tmpDir := s.TmpDir()
+	now := strconv.FormatInt(time.Now().Unix(), 10)
+
+	tmpf, err := os.CreateTemp(tmpDir, now+"_*")
+	if err != nil {
+		return meta, "", fmt.Errorf("failed to create tmp file: %w", err)
+	}
+
+	hasher := sha256.New()
+	buf := make([]byte, 32*1024)
+	sniff := make([]byte, 0, 512)
+	size := int64(0)
+
+	for {
+		read, err := blob.Read(buf)
+		if read > 0 {
+			size += int64(read)
+			chunk := buf[:read]
+
+			if len(sniff) < 512 {
+				// accumulate sniff bytes
+				need := 512 - len(sniff)
+				got := min(read, need)
+				sniff = append(sniff, chunk[:got]...)
+			}
+
+			if _, err := hasher.Write(chunk); err != nil {
+				cleanup(tmpf)
+				return meta, "", fmt.Errorf("failed to hash write: %w", err)
+			}
+
+			if _, err := tmpf.Write(chunk); err != nil {
+				cleanup(tmpf)
+				return meta, "", fmt.Errorf("failed to write tmp file: %w", err)
+			}
+		}
+
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			cleanup(tmpf)
+			return meta, "", fmt.Errorf("failed to read source: %w", err)
+		}
+	}
+
+	if err := tmpf.Sync(); err != nil {
+		cleanup(tmpf)
+		return meta, "", fmt.Errorf("failed to sync tmp file: %w", err)
+	}
+
+	if err := tmpf.Close(); err != nil {
+		cleanup(tmpf)
+		return meta, "", fmt.Errorf("failed to close tmp file: %w", err)
+	}
+
+	copy(meta.Hash[:], hasher.Sum(nil))
+	meta.MIME = http.DetectContentType(sniff)
+	meta.Size = size
+	return meta, tmpf.Name(), nil
+}
+
+// CommitBlob renames the temporary file to the appropriate blob path given by the provided hash.
+func (s *Store) commitBlob(hash blossom.Hash, tmpPath string) error {
 	path := s.BlobPath(hash)
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if os.IsExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	_, err = file.Write(blob)
-	cErr := file.Close()
-	if err == nil && cErr != nil {
-		err = cErr
-	}
-
-	if err != nil {
-		os.Remove(path)
-		return err
-	}
-	return nil
+	return os.Rename(tmpPath, path)
 }
 
 // SaveMeta saves the blob metadata.

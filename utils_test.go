@@ -59,6 +59,8 @@ func TestHex3Int(t *testing.T) {
 }
 
 func TestBlobPath(t *testing.T) {
+	s := Store{}
+
 	tests := []struct {
 		hex  string
 		path string
@@ -77,7 +79,7 @@ func TestBlobPath(t *testing.T) {
 				t.Fatalf("setup failed: %v", err)
 			}
 
-			path := blobPath(hash)
+			path := s.BlobPath(hash)
 			if path != test.path {
 				t.Fatalf("expected path %v, got %v", test.path, path)
 			}

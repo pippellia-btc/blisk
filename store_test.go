@@ -1,6 +1,7 @@
 package blisk
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -37,18 +38,19 @@ func TestSaveLoadBlob(t *testing.T) {
 	defer store.Close()
 
 	original := []byte("bobby")
+	blob := bytes.NewReader(original)
 	hash := sha256.Sum256(original)
 
-	if err := store.saveBlob(hash, original); err != nil {
+	if _, err = store.Save(ctx, blob, ""); err != nil {
 		t.Fatal(err)
 	}
 
-	blob, err := store.Load(ctx, hash)
+	file, err := store.Load(ctx, hash)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := io.ReadAll(blob)
+	data, err := io.ReadAll(file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +98,9 @@ func TestSaveDelete(t *testing.T) {
 	}
 	defer store.Close()
 
-	blob := []byte("buddy")
-	hash := blossom.ComputeHash(blob)
+	data := []byte("buddy")
+	blob := bytes.NewReader(data)
+	hash := sha256.Sum256(data)
 
 	if _, err = store.Save(ctx, blob, "alice"); err != nil {
 		t.Fatal(err)
@@ -109,7 +112,7 @@ func TestSaveDelete(t *testing.T) {
 
 	if _, err = store.Info(ctx, hash); err != nil {
 		// the blob should not have been deleted, since "bob" didn't upload it.
-		// Therefore this Info should not return an error.
+		// Therefore this call to Info should not return an error.
 		t.Fatalf("expected no error from Info, got %v", err)
 	}
 
@@ -130,15 +133,16 @@ func TestBlobsOf(t *testing.T) {
 	}
 	defer store.Close()
 
-	original := make([]blossom.Hash, 100)
+	originals := make([]blossom.Hash, 100)
 	for i := range 100 {
-		blob := []byte(fmt.Sprintf("blob %d", i))
+		data := []byte(fmt.Sprintf("blob %d", i))
+		blob := bytes.NewReader(data)
 
 		meta, err := store.Save(ctx, blob, "alice")
 		if err != nil {
 			t.Fatalf("setup failed: %v", err)
 		}
-		original[i] = meta.Hash
+		originals[i] = meta.Hash
 	}
 
 	hashes, err := store.Hashes(ctx, "alice")
@@ -146,14 +150,14 @@ func TestBlobsOf(t *testing.T) {
 		t.Fatalf("expected error nil, got %v", err)
 	}
 
-	slices.SortFunc(original, func(a, b blossom.Hash) int {
+	slices.SortFunc(originals, func(a, b blossom.Hash) int {
 		return cmp.Compare(string(a[:]), string(b[:]))
 	})
 	slices.SortFunc(hashes, func(a, b blossom.Hash) int {
 		return cmp.Compare(string(a[:]), string(b[:]))
 	})
 
-	if !slices.Equal(original, hashes) {
-		t.Fatalf("expected hashes %v, got %v", original, hashes)
+	if !slices.Equal(originals, hashes) {
+		t.Fatalf("expected hashes %v, got %v", originals, hashes)
 	}
 }
