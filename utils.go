@@ -22,7 +22,7 @@ func (h Hex3) Int() int {
 	return int(n)
 }
 
-// ToHex3 converts an integer between 0 abd 4095 to a Hex3.
+// ToHex3 converts an integer between 0 and 4095 to a Hex3.
 func ToHex3(n int) (Hex3, error) {
 	if n < 0 || n > 4095 {
 		return "", fmt.Errorf("number out of range: %d", n)
