@@ -4,4 +4,4 @@ go 1.23.1
 
 require github.com/mattn/go-sqlite3 v1.14.32
 
-require github.com/pippellia-btc/blossom v0.1.0
+require github.com/pippellia-btc/blossom v0.3.0

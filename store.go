@@ -240,7 +240,7 @@ func (s *Store) saveTmpBlob(blob io.Reader) (meta blossom.BlobMeta, tmpPath stri
 	}
 
 	copy(meta.Hash[:], hasher.Sum(nil))
-	meta.MIME = http.DetectContentType(sniff)
+	meta.Type = http.DetectContentType(sniff)
 	meta.Size = size
 	return meta, tmpf.Name(), nil
 }
@@ -262,8 +262,8 @@ func (s *Store) saveMeta(ctx context.Context, uploader string, meta blossom.Blob
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec(`INSERT OR IGNORE INTO blobs (hash, mime, size, created_at) VALUES (?, ?, ?, ?)`,
-		meta.Hash, meta.MIME, meta.Size, now)
+	_, err = tx.Exec(`INSERT OR IGNORE INTO blobs (hash, type, size, created_at) VALUES (?, ?, ?, ?)`,
+		meta.Hash, meta.Type, meta.Size, now)
 	if err != nil {
 		return 0, err
 	}
@@ -288,9 +288,9 @@ func (s *Store) saveMeta(ctx context.Context, uploader string, meta blossom.Blob
 // Info returns the metadata of a blob, identified by the provided hash.
 func (s *Store) Info(ctx context.Context, hash blossom.Hash) (blossom.BlobMeta, error) {
 	meta := blossom.BlobMeta{Hash: hash}
-	row := s.index.QueryRowContext(ctx, `SELECT mime, size, created_at FROM blobs WHERE hash = ?`, hash)
+	row := s.index.QueryRowContext(ctx, `SELECT type, size, created_at FROM blobs WHERE hash = ?`, hash)
 
-	err := row.Scan(&meta.MIME, &meta.Size, &meta.CreatedAt)
+	err := row.Scan(&meta.Type, &meta.Size, &meta.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return blossom.BlobMeta{}, fmt.Errorf("%w: hash %s", ErrNotFound, hash)
 	}
