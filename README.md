@@ -2,6 +2,10 @@
 
 Blisk is a local database for storing [blossom blobs](https://github.com/hzrd149/blossom) on disk. It is designed for efficient, scalable, and deduplicated blob storage while maintaining metadata in sqlite. It's short for Blobs on Disk.
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/pippellia-btc/blisk)](https://goreportcard.com/report/github.com/pippellia-btc/blisk)
+[![Go Reference](https://pkg.go.dev/badge/github.com/pippellia-btc/blisk.svg)](https://pkg.go.dev/github.com/pippellia-btc/blisk)
+
+
 ## Installation
 
 ```
