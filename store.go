@@ -79,7 +79,7 @@ func initDirs(path string) error {
 	return nil
 }
 
-// InitSqlite initalize the sqlite index of the store.
+// InitSqlite initialize the sqlite index of the store.
 func initSqlite(path string) (*sql.DB, error) {
 	name := filepath.Join(path, "index.sqlite")
 	db, err := sql.Open("sqlite3", name)
