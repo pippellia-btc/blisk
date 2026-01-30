@@ -68,7 +68,7 @@ func TestSaveInfoMeta(t *testing.T) {
 	defer store.Close()
 
 	blob := []byte("blobby")
-	original := blossom.BlobMeta{
+	original := BlobMeta{
 		Hash: blossom.ComputeHash(blob),
 		Type: http.DetectContentType(blob),
 		Size: int64(len(blob)),

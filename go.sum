@@ -1,4 +1,4 @@
 github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuErjs=
 github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
-github.com/pippellia-btc/blossom v0.3.0 h1:t0U1A8ta8Ia2kVw9lQKwTELPrbrmXLZoX4bpDfKamSc=
-github.com/pippellia-btc/blossom v0.3.0/go.mod h1:0FK415GivYBfOJambaAhg1FZkDB5cep/skpP01hfAnc=
+github.com/pippellia-btc/blossom v0.4.2 h1:uq0kAEcK3hPM+NcHi9jfmsjy8yKsqIKondRRq8mVs7o=
+github.com/pippellia-btc/blossom v0.4.2/go.mod h1:0FK415GivYBfOJambaAhg1FZkDB5cep/skpP01hfAnc=

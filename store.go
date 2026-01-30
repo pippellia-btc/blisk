@@ -156,12 +156,20 @@ func (s *Store) Optimize(ctx context.Context) error {
 	return err
 }
 
-// Save the provided blob by its hash, returning the [blossom.BlobMeta] or an error.
+// BlobMeta represent the metadata of a blob.
+type BlobMeta struct {
+	Hash      blossom.Hash
+	Type      string
+	Size      int64
+	CreatedAt int64
+}
+
+// Save the provided blob by its hash, returning the [BlobMeta] or an error.
 // It is idempotent; multiple calls to Save with the same blob and uploader will result in a no-op.
-func (s *Store) Save(ctx context.Context, blob io.Reader, uploader string) (blossom.BlobMeta, error) {
+func (s *Store) Save(ctx context.Context, blob io.Reader, uploader string) (BlobMeta, error) {
 	meta, tmp, err := s.saveTmpBlob(blob)
 	if err != nil {
-		return blossom.BlobMeta{}, fmt.Errorf("failed to save blob: %w", err)
+		return BlobMeta{}, fmt.Errorf("failed to save blob: %w", err)
 	}
 
 	s.lock(meta.Hash)
@@ -170,19 +178,19 @@ func (s *Store) Save(ctx context.Context, blob io.Reader, uploader string) (blos
 	err = s.commitBlob(meta.Hash, tmp)
 	if err != nil {
 		os.Remove(tmp)
-		return blossom.BlobMeta{}, fmt.Errorf("failed to commit blob %s: %w", meta.Hash, err)
+		return BlobMeta{}, fmt.Errorf("failed to commit blob %s: %w", meta.Hash, err)
 	}
 
 	meta.CreatedAt, err = s.saveMeta(ctx, uploader, meta)
 	if err != nil {
-		return blossom.BlobMeta{}, fmt.Errorf("failed to save metadata of blob %s: %w", meta.Hash, err)
+		return BlobMeta{}, fmt.Errorf("failed to save metadata of blob %s: %w", meta.Hash, err)
 	}
 	return meta, nil
 }
 
 // SaveTmpBlob writes the blob to a temp dir, while computing the blob's metadata
 // like size, hash and MIME type.
-func (s *Store) saveTmpBlob(blob io.Reader) (meta blossom.BlobMeta, tmpPath string, err error) {
+func (s *Store) saveTmpBlob(blob io.Reader) (meta BlobMeta, tmpPath string, err error) {
 	tmpDir := s.TmpDir()
 	now := strconv.FormatInt(time.Now().Unix(), 10)
 
@@ -253,7 +261,7 @@ func (s *Store) commitBlob(hash blossom.Hash, tmpPath string) error {
 
 // SaveMeta saves the blob metadata.
 // It is idempotent; multiple calls to saveMeta with the same hash and uploader will result in a no-op.
-func (s *Store) saveMeta(ctx context.Context, uploader string, meta blossom.BlobMeta) (createdAt int64, err error) {
+func (s *Store) saveMeta(ctx context.Context, uploader string, meta BlobMeta) (createdAt int64, err error) {
 	now := time.Now().Unix()
 
 	tx, err := s.index.BeginTx(ctx, nil)
@@ -286,16 +294,16 @@ func (s *Store) saveMeta(ctx context.Context, uploader string, meta blossom.Blob
 }
 
 // Info returns the metadata of a blob, identified by the provided hash.
-func (s *Store) Info(ctx context.Context, hash blossom.Hash) (blossom.BlobMeta, error) {
-	meta := blossom.BlobMeta{Hash: hash}
+func (s *Store) Info(ctx context.Context, hash blossom.Hash) (BlobMeta, error) {
+	meta := BlobMeta{Hash: hash}
 	row := s.index.QueryRowContext(ctx, `SELECT type, size, created_at FROM blobs WHERE hash = ?`, hash)
 
 	err := row.Scan(&meta.Type, &meta.Size, &meta.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return blossom.BlobMeta{}, fmt.Errorf("%w: hash %s", ErrNotFound, hash)
+		return BlobMeta{}, fmt.Errorf("%w: hash %s", ErrNotFound, hash)
 	}
 	if err != nil {
-		return blossom.BlobMeta{}, fmt.Errorf("failed to fetch metadata of blob %s: %w", hash, err)
+		return BlobMeta{}, fmt.Errorf("failed to fetch metadata of blob %s: %w", hash, err)
 	}
 	return meta, nil
 }
